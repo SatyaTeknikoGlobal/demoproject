@@ -1,0 +1,616 @@
+<?php
+namespace App\Http\Controllers;
+
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Foundation\Bus\DispatchesJobs;
+use Illuminate\Http\Request;
+use Illuminate\Foundation\Validation\ValidatesRequests;
+use Illuminate\Routing\Controller as BaseController;
+use App\Helpers\CustomHelper;
+use App\Http\Controllers\Controller;
+
+use App\Vendor;
+use App\Users;
+use App\CouponCategory;
+use Auth;
+use DB;
+use Validator;
+use Storage;
+use App\Cart;
+use App\Order;
+
+
+
+
+
+class HomeController extends Controller
+{
+
+
+
+
+  public function index(Request $request){
+    $data = [];
+    $slug = isset($request->slug) ? $request->slug :'';
+    $date = date('Y-m-d');
+
+    if(!empty($slug)){
+
+      $vendor = Vendor::where('slug',$slug)->first();
+      if(!empty($vendor)){
+        $data['vendor'] = $vendor;
+        $coupon_Categories = DB::table('coupan_catagory')->where('status',1)->where('vender_id',$vendor->id)->limit(5)->get();
+        $all_coupons = DB::table('coupan')->where('status',1)->where('vender_id',$vendor->id)->where('expary_date','>',$date)->get();
+
+
+        $data['coupon_Categories'] = $coupon_Categories;
+        $data['all_coupons'] = $all_coupons;
+       // prd($all_coupons);
+        return view('front.home.index',$data);
+      }else{
+        abort(404);
+      }
+    }else{
+      abort(404);
+    }
+  }
+
+  public function get_cart(Request $request){
+    $data = [];
+    $slug = isset($request->slug) ? $request->slug : '';
+    //prd($slug);
+
+    if(!empty($slug)){
+      $vendor = Vendor::where('slug',$slug)->first();
+      $data['vendor'] = $vendor;
+      $user_id =  isset(Auth::guard('appusers')->user()->id) ? Auth::guard('appusers')->user()->id :'';
+
+      $carts = Cart::where('vendor_id',$vendor->id)->where('user_id',$user_id)->get();
+      $data['carts'] = $carts;
+
+      return view('front.home.cart',$data);
+
+    }else{
+      abort(404);
+    }
+
+  }
+
+
+
+
+
+  public function profile(Request $request){
+   $data = [];
+   $slug = isset($request->slug) ? $request->slug : '';
+   if(!empty($slug)){
+    $vendor = Vendor::where('slug',$slug)->first();
+    $data['vendor'] = $vendor;
+
+    return view('front.home.profile',$data);
+
+  }else{
+    abort(404);
+  }
+}
+
+public function search(Request $request){
+ $data = [];
+ $slug = isset($request->slug) ? $request->slug : '';
+ if(!empty($slug)){
+  $vendor = Vendor::where('slug',$slug)->first();
+  $data['vendor'] = $vendor;
+
+  return view('front.home.search',$data);
+
+}else{
+  abort(404);
+}
+}
+
+
+public function category_list(Request $request){
+
+ $data = [];
+ $slug = isset($request->slug) ? $request->slug : '';
+ if(!empty($slug)){
+  $vendor = Vendor::where('slug',$slug)->first();
+  $data['vendor'] = $vendor;
+
+  return view('front.home.category',$data);
+
+}else{
+  abort(404);
+}
+}
+
+
+
+
+public function edit_profile(Request $request){
+  $data = [];
+  $slug = isset($request->slug) ? $request->slug : '';
+  $user_id = isset(Auth::guard('appusers')->user()->id) ? Auth::guard('appusers')->user()->id:'';
+  $method = $request->method();
+  if($method == 'POST' || $method == 'post'){
+    $rules = [];
+    $rules['name'] = 'required';
+    $rules['email'] = 'required|email';
+    $rules['mobile'] = 'required|numeric';
+    $this->validate($request, $rules);
+    $name = isset($request->name) ? $request->name :'';
+    $email = isset($request->email) ? $request->email :'';
+    $mobile = isset($request->mobile) ? $request->mobile :'';
+    $dbArr = [];
+    $dbArr['name'] = $name;
+    $dbArr['email'] = $email;
+    $dbArr['mobile'] = $mobile;
+    $saveUser = Users::where('id',$user_id)->update($dbArr);
+    if ($saveUser) {
+      $alert_msg = 'Updated successfully.';
+      return back()->with('alert-success', $alert_msg);
+    } else {
+      return back()->with('alert-danger', 'something went wrong, please try again or contact the administrator.');
+    }
+  }
+
+  if(!empty($slug)){
+    $vendor = Vendor::where('slug',$slug)->first();
+    $data['vendor'] = $vendor;
+
+    return view('front.home.edit_profile',$data);
+
+  }else{
+    abort(404);
+  }
+}
+
+public function upload(Request $request){
+
+ $this->validate($request, [
+  'image' => 'image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+]);
+ $user_id = isset(Auth::guard('appusers')->user()->id) ? Auth::guard('appusers')->user()->id:'';
+ if ($request->hasFile('image')) {
+  $file = $request->file('image');
+  $user = Users::find($user_id);
+
+  $oldImg = isset($user->image) ? $user->image :'';
+  $saved = $this->saveImage($file,$user,$oldImg);
+  if($saved){
+    $alert_msg = 'Updated successfully.';
+    return back()->with('alert-success', $alert_msg);
+  }else {
+    return back()->with('alert-danger', 'something went wrong, please try again or contact the administrator.');
+  }
+}
+
+}
+
+
+public function saveImage($file, $user, $oldImg=''){
+ if ($file) {
+  $path = 'users/';
+  $thumb_path = 'users/thumb/';
+  $storage = Storage::disk('public');
+            //prd($storage);
+
+
+  $IMG_WIDTH = 768;
+  $IMG_HEIGHT = 768;
+  $THUMB_WIDTH = 336;
+  $THUMB_HEIGHT = 336;
+
+  $uploaded_data = CustomHelper::UploadImage($file, $path, $ext='', $IMG_WIDTH, $IMG_HEIGHT, $is_thumb=true, $thumb_path, $THUMB_WIDTH, $THUMB_HEIGHT);
+  if($uploaded_data['success']){
+
+    if(!empty($oldImg)){
+      if($storage->exists($path.$oldImg)){
+        $storage->delete($path.$oldImg);
+      }
+      if($storage->exists($thumb_path.$oldImg)){
+        $storage->delete($thumb_path.$oldImg);
+      }
+    }
+
+    $image = $uploaded_data['file_name'];
+
+    $user->image = url('/public/storage/users/').'/'.$image;
+    $user->save();         
+  }
+
+  if(!empty($uploaded_data)){   
+    return $uploaded_data;
+  }  
+
+}
+
+}
+
+public function coupon_listing(Request $request){
+  $data = [];
+  $date = date('Y-m-d');
+  $slug = isset($request->slug) ? $request->slug : '';
+  $cat_id = isset($request->id) ? $request->id : '';
+  if(!empty($slug)){
+    $vendor = Vendor::where('slug',$slug)->first();
+    $data['vendor'] = $vendor;
+    $coupon_Categories = DB::table('coupan_catagory')->where('status',1)->where('id',$cat_id)->where('vender_id',$vendor->id)->first();
+    $coupons = DB::table('coupan')->where('status',1)->where('category_id',$cat_id)->where('vender_id',$vendor->id)->where('expary_date','>',$date)->get();
+
+ //prd($coupons);
+
+
+    $data['coupons'] = $coupons;
+
+    $data['coupon_Categories'] = $coupon_Categories;
+
+    return view('front.home.coupon_listing',$data);
+
+  }else{
+    abort(404);
+  }
+
+}
+
+public function product_listing(Request $request){
+
+ $data = [];
+ $date = date('Y-m-d');
+ $coup_id = isset($request->id) ? $request->id :'';
+
+ $slug = isset($request->slug) ? $request->slug : '';
+
+ if(!empty($slug)){
+  $vendor = Vendor::where('slug',$slug)->first();
+  $data['vendor'] = $vendor;
+  $coupon = DB::table('coupan')->where('status',1)->where('id',$coup_id)->where('vender_id',$vendor->id)->first();
+
+  $products = DB::table('coupan_product')->where('coupan_id',$coup_id)->where('vender_id',$vendor->id)->get();
+
+
+
+  $data['coupon'] = $coupon;
+  $data['products'] = $products;
+
+
+  return view('front.home.product_listing',$data);
+
+}else{
+  abort(404);
+}
+
+
+}
+
+public function all_coupon_cat(Request $request){
+
+ $data = [];
+ $date = date('Y-m-d');
+ $coup_id = isset($request->id) ? $request->id :'';
+ $date = date('Y-m-d');
+ $slug = isset($request->slug) ? $request->slug : '';
+
+ if(!empty($slug)){
+  $vendor = Vendor::where('slug',$slug)->first();
+  $data['vendor'] = $vendor;
+  $coupon_Categories = DB::table('coupan_catagory')->where('status',1)->where('vender_id',$vendor->id)->get();
+  $all_coupons = DB::table('coupan')->where('status',1)->where('vender_id',$vendor->id)->where('expary_date','>',$date)->get();
+  $products = DB::table('coupan_product')->where('vender_id',$vendor->id)->count();
+
+  $data['all_count_product'] = $products;
+
+  $data['coupon_Categories'] = $coupon_Categories;
+  $data['all_coupons'] = $all_coupons;
+
+  return view('front.home.all_category',$data);
+
+}else{
+  abort(404);
+}
+
+
+}
+
+public function add_to_cart(Request $request){
+  $data = [];
+  $date = date('Y-m-d');
+  $slug = isset($request->slug) ? $request->slug :'';
+  
+  $coupon_id = isset($request->coupon_id) ? $request->coupon_id : '';
+  $user_id =  isset(Auth::guard('appusers')->user()->id) ? Auth::guard('appusers')->user()->id :'';
+  if($user_id != ''){
+    if($coupon_id !=''){
+      if($slug !=''){
+       $vendor = Vendor::where('slug',$slug)->first();
+       $exists = Cart::where('user_id',$user_id)->where('coupon_id',$coupon_id)->where('vendor_id',$vendor->id)->first();
+       $exist_coupon = DB::table('coupan')->where('id',$coupon_id)->first();
+       $coupon_no = $exist_coupon->nomber_of_use - $exist_coupon->used;
+       if($coupon_no != 0 && $exists->qty < $coupon_no){
+        if(!empty($exists)){
+         $dbArr = [];
+         $dbArr['user_id'] = $user_id;
+         $dbArr['coupon_id'] = $coupon_id;
+         $dbArr['qty'] = ($exists->qty +1);
+         $dbArr['vendor_id'] = $vendor->id;
+         $res = Cart::where('id',$exists->id)->update($dbArr);
+         if($res){
+        echo json_encode(array('status'=>true,'message'=>'Coupon Added to Cart successfully'));
+       }
+       }else{
+         $dbArr = [];
+         $dbArr['user_id'] = $user_id;
+         $dbArr['coupon_id'] = $coupon_id;
+         $dbArr['qty'] = 1;
+         $dbArr['vendor_id'] = $vendor->id;
+         $res = Cart::create($dbArr);
+         if($res){
+        echo json_encode(array('status'=>true,'message'=>'Coupon Added to Cart successfully'));
+                 }
+       }
+       //  else{
+       //  echo json_encode(array('status'=>true,'message'=>'Sold Out'));
+
+       // }
+
+      }else{
+        echo json_encode(array('status'=>true,'message'=>'Sold Out'));
+
+      }
+
+    }else{
+      echo json_encode(array('status'=>false,'message'=>'Please Choose Vendor'));
+
+    }
+  }else{
+    echo json_encode(array('status'=>false,'message'=>'Please Choose Coupon'));
+
+  }
+
+}else{
+  echo json_encode(array('status'=>false,'message'=>'Please Login'));
+}
+
+
+
+}
+
+
+public function cart_minus(Request $request){
+  $cart_id = isset($request->cart_id) ? $request->cart_id :'';
+  $coupon_id = isset($request->coupon_id) ? $request->coupon_id :'';
+  $vendor_id = isset($request->vendor_id) ? $request->vendor_id :'';
+  $user_id =  isset(Auth::guard('appusers')->user()->id) ? Auth::guard('appusers')->user()->id :'';
+  $cart_qty = 0;
+  if($cart_id !=''){
+    $exists = Cart::where('id',$cart_id)->first(); 
+    $qty = $exists->qty;
+    $dbArr = [];
+    $cart_qty = $qty;
+    if($qty >1){
+
+      $dbArr['qty'] = ($qty -1);
+      $cart_qty = $dbArr['qty'];
+      $res = Cart::where('id',$exists->id)->update($dbArr);
+    }
+
+    if(!empty($user_id)){
+      $carts = Cart::where('user_id',$user_id)->where('vendor_id',$vendor_id)->get();
+      if(!empty($carts)){
+        $total =  0;
+        foreach($carts as $cart){
+         $coupon = DB::table('coupan')->where('id',$cart->coupon_id)->where('vender_id',$vendor_id)->first();
+         $price = $cart->qty * $coupon->c_price;
+         $total +=$price;
+       }
+     }
+     echo json_encode(array('status'=>true,'total'=>$total,'qty'=>$cart_qty));
+
+   }else{
+    echo json_encode(array('status'=>false,'total'=>0,'message'=>'User Id Required'));
+
+  }
+
+
+}
+
+
+}
+
+
+
+public function cart_plus(Request $request){
+  $cart_id = isset($request->cart_id) ? $request->cart_id :'';
+  $coupon_id = isset($request->coupon_id) ? $request->coupon_id :'';
+  $vendor_id = isset($request->vendor_id) ? $request->vendor_id :'';
+  $user_id =  isset(Auth::guard('appusers')->user()->id) ? Auth::guard('appusers')->user()->id :'';
+  $cart_qty = 0;
+  if($cart_id !=''){
+    $exists = Cart::where('id',$cart_id)->first(); 
+    $qty = $exists->qty;
+    $dbArr = [];
+    $coupon = DB::table('coupan')->where('id',$coupon_id)->first();
+    if($coupon->nomber_of_use >= $qty +1){
+      $dbArr['qty'] = ($qty +1);
+      $cart_qty = $dbArr['qty'];
+      $res = Cart::where('id',$exists->id)->update($dbArr);
+
+      if(!empty($user_id)){
+        $carts = Cart::where('user_id',$user_id)->where('vendor_id',$vendor_id)->get();
+        if(!empty($carts)){
+          $total =  0;
+          foreach($carts as $cart){
+           $coupon = DB::table('coupan')->where('id',$cart->coupon_id)->where('vender_id',$vendor_id)->first();
+           $price = $cart->qty * $coupon->c_price;
+           $total +=$price;
+         }
+       }
+       echo json_encode(array('status'=>true,'total'=>$total,'qty'=>$cart_qty));
+
+     }else{
+      echo json_encode(array('status'=>false,'total'=>0,'message'=>'User Id Required'));
+
+    }
+  }else{
+    echo json_encode(array('status'=>false,'total'=>0,'message'=>'Out of Stock'));
+
+  }
+
+}
+
+
+}
+
+public function delete_cart_item(Request $request){
+  $cart_id = isset($request->cart_id) ? $request->cart_id :'';
+  $coupon_id = isset($request->coupon_id) ? $request->coupon_id :'';
+  $vendor_id = isset($request->vendor_id) ? $request->vendor_id :'';
+  $user_id =  isset(Auth::guard('appusers')->user()->id) ? Auth::guard('appusers')->user()->id :'';
+
+  if($cart_id !=''){
+    $exists = Cart::where('id',$cart_id)->first(); 
+
+    if(!empty($exists)){
+      $res = Cart::where('id',$exists->id)->delete();
+      if(!empty($user_id)){
+        $carts = Cart::where('user_id',$user_id)->where('vendor_id',$vendor_id)->get();
+        if(!empty($carts)){
+          $total =  0;
+          foreach($carts as $cart){
+           $coupon = DB::table('coupan')->where('id',$cart->coupon_id)->where('vender_id',$vendor_id)->first();
+           $price = $cart->qty * $coupon->c_price;
+           $total +=$price;
+         }
+       }
+       echo json_encode(array('status'=>true,'total'=>$total));
+
+     }else{
+      echo json_encode(array('status'=>false,'total'=>0,'message'=>'User Id Required'));
+
+    }
+
+
+  }
+}else{
+  echo json_encode(array('status'=>false,'total'=>0,'message'=>'Cart Id Required'));
+
+}
+
+
+
+
+}
+
+
+public function place_order(Request $request){
+  $user_id =  isset(Auth::guard('appusers')->user()->id) ? Auth::guard('appusers')->user()->id :'';
+  $slug = isset($request->slug) ? $request->slug : '';
+  $data = [];
+  $order_ids = [];
+  if(!empty($slug)){
+    $vendor = Vendor::where('slug',$slug)->first();
+    $data['vendor'] = $vendor;
+    $users = DB::table('web_users')->where('id',$user_id)->first();
+    $carts = Cart::where('user_id',$user_id)->where('vendor_id',$vendor->id)->get();
+
+    if(!empty($carts)){
+     foreach($carts as $cart){
+      $dbArray = [];
+      $coupon = DB::table('coupan')->where('id',$cart->coupon_id)->first();
+      $dbArray['name'] = isset($users->name) ? $users->name :'';
+      $dbArray['email'] = isset($users->email) ? $users->email :'';
+      $dbArray['phone'] = isset($users->mobile) ? $users->mobile :'';
+      $dbArray['order_status'] = 'pending';
+      $dbArray['vendor_id'] = $vendor->id;
+      $dbArray['total_price'] = $cart->qty * $coupon->c_price;
+      $dbArray['vendor_status'] = 'pending';
+      $dbArray['user_id'] = $user_id;
+      $dbArray['expary_date'] = $coupon->expary_date;
+      $dbArray['coupon_id'] = $cart->coupon_id;
+      $dbArray['qty'] = $cart->qty;
+      $dbArray['price'] = $coupon->c_price;
+
+      $dbArray['vendor_status'] = 'pending';
+         // $order_item_id = DB::table('order_coupons')->insertGetId($itemArr);
+
+
+      $order_id = DB::table('orders')->insert($dbArray);
+
+      $qtyUpdate = [];
+      $qtyUpdate['used'] = $coupon->nomber_of_use + $cart->qty;
+
+
+      DB::table('coupan')->where('id',$cart->coupon_id)->update($qtyUpdate);
+
+
+
+
+      $last_entry = DB::table('orders')->latest()->first();
+      $order_ids[] = $last_entry;
+
+    }
+    $data['order_ids'] = $order_ids;
+
+
+    $cart_delete = Cart::where('user_id',$user_id)->where('vendor_id',$vendor->id)->delete();
+    $data['carts'] = $carts;
+    
+    //prd($data);
+
+    return view('front.home.order_success',$data);   
+  }else{
+    return back()->with('alert-danger', 'Add Something in Your Cart.');
+  }
+
+}else{
+  abort(404);
+}
+
+}
+
+
+public function secrch_suggest(Request $request){
+  $secrch_keyword = isset($request->secrch_keyword) ? $request->secrch_keyword :'';
+  $vender_id = isset($request->vendor_id) ? $request->vendor_id :'';
+
+  $vendor = Vendor::where('id',$vender_id)->first();
+  $coupons = DB::table('coupan')->where('name', 'like', '%' .$secrch_keyword . '%')->where('vender_id',$vender_id)->get();
+
+  $html = '<section class="padding-x">
+  <ul class="list-search-suggestion">';
+  if(!empty($coupons) && count($coupons) > 0){
+    foreach($coupons as $coup){
+      $html.= '<li>
+      <a href='.url($vendor->slug.'/products/'.$coup->id).' class="text">'.$coup->name.'</a>
+
+      </li>';
+    }
+  }
+
+  $html.='</ul>';
+
+
+  echo $html;
+}
+
+
+public function order_list(Request $request){
+ $data = [];
+ $slug = isset($request->slug) ? $request->slug : '';
+$user_id =  isset(Auth::guard('appusers')->user()->id) ? Auth::guard('appusers')->user()->id :'';
+
+ if(!empty($slug)){
+  $vendor = Vendor::where('slug',$slug)->first();
+  $data['vendor'] = $vendor;
+  $orders = Order::where('user_id',$user_id)->where('vendor_id',$vendor->id)->get();
+
+ $data['orders'] = $orders;
+  return view('front.home.orders_list',$data);
+
+}else{
+  abort(404);
+}
+}
+
+
+}
